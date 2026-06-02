@@ -1,6 +1,6 @@
 import { MouseEvent, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Check, ChevronDown, LayoutGrid, List } from 'lucide-react';
+import { Check, ChevronDown, LayoutGrid, List, Search, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { Footer } from '@/components/Footer';
@@ -19,7 +19,7 @@ import { VIETNAM_ADMINISTRATIVE_UNITS } from '@/data/vietnamAdministrative';
 import { VIETNAM_PROVINCES } from '@/data/provinces';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { getImageUrl, getProperties, normalizeListResponse, Property, toggleFavorite } from '@/lib/propertiesApi';
+import { getImageUrl, getProperties, normalizeListResponse, Property, PropertyFilters, toggleFavorite } from '@/lib/propertiesApi';
 
 type ViewMode = 'grid' | 'list';
 type SortBy = 'newest' | 'price-asc' | 'price-desc';
@@ -45,6 +45,28 @@ interface ListingViewModel {
 }
 
 const ITEMS_PER_PAGE = 30;
+const PRICE_PRESETS: Record<string, [number, number]> = {
+  '0-2': [0, 2],
+  '2-5': [2, 5],
+  '5-10': [5, 10],
+  '10-60': [10, 60],
+};
+
+const normalizeListingTypeParam = (value: string | null): ListingFiltersState['listingType'] =>
+  value === 'rent' ? 'rent' : 'buy';
+
+const parsePropertyTypesParam = (value: string | null): string[] =>
+  value
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
+
+const parseBedroomsParam = (value: string | null): number | null => {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 
 const normalizeLocationValue = (value: string): string =>
   value
@@ -55,6 +77,9 @@ const normalizeLocationValue = (value: string): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+
+const slugifyLocationValue = (value: string): string =>
+  normalizeLocationValue(value).replace(/\s+/g, '-');
 
 const dedupeLocations = (values: string[]): string[] => {
   const seen = new Set<string>();
@@ -72,17 +97,60 @@ const dedupeLocations = (values: string[]): string[] => {
   return deduped.sort((a, b) => a.localeCompare(b, 'vi'));
 };
 
+const getAdministrativeProvince = (city: string) => {
+  const normalizedCity = normalizeLocationValue(city);
+  return VIETNAM_ADMINISTRATIVE_UNITS.find(
+    (item) =>
+      normalizeLocationValue(item.name) === normalizedCity ||
+      normalizeLocationValue(item.full_name) === normalizedCity,
+  );
+};
+
+const formatDistrictLabel = (city: string, district: string | null | undefined): string => {
+  const rawDistrict = String(district ?? '').trim();
+  if (!rawDistrict) return '';
+
+  const province = getAdministrativeProvince(city);
+  const normalizedDistrict = normalizeLocationValue(rawDistrict);
+  const matchedDistrict = province?.districts.find(
+    (item) =>
+      normalizeLocationValue(item.name) === normalizedDistrict ||
+      normalizeLocationValue(item.full_name) === normalizedDistrict,
+  );
+  if (matchedDistrict) {
+    return matchedDistrict.full_name || matchedDistrict.name;
+  }
+
+  const isHoChiMinh = normalizeLocationValue(city).includes('ho chi minh');
+  if (isHoChiMinh && /^\d+$/.test(rawDistrict)) {
+    return `Quận ${rawDistrict}`;
+  }
+  if (isHoChiMinh) {
+    const districtNumber = rawDistrict.match(/^district\s+(\d+)$/i)?.[1];
+    if (districtNumber) return `Quận ${districtNumber}`;
+  }
+
+  return rawDistrict;
+};
+
 const getLocationLabelFromSlug = (provinceSlug: string | null, locationSlug: string | null) => {
   const province = provinceSlug
     ? VIETNAM_PROVINCES.find((item) => item.slug === provinceSlug)
     : undefined;
+  const administrativeProvince = province ? getAdministrativeProvince(province.name) : undefined;
   const district = province && locationSlug
-    ? province.locations.find((item) => item.slug === locationSlug)
+    ? (
+        administrativeProvince?.districts.find((item) =>
+          slugifyLocationValue(item.full_name || item.name) === locationSlug ||
+          slugifyLocationValue(item.name) === locationSlug,
+        ) ??
+        province.locations.find((item) => item.slug === locationSlug)
+      )
     : undefined;
 
   return {
     city: province?.name ?? '',
-    district: district?.name ?? '',
+    district: district ? ('full_name' in district ? district.full_name || district.name : district.name) : '',
   };
 };
 
@@ -93,6 +161,7 @@ const formatVndPrice = (price: number): string => {
 
 const mapPropertyToListing = (property: Property): ListingViewModel => {
   const rawPrice = Number(property.price || 0);
+  const district = formatDistrictLabel(property.city || '', property.district);
   return {
     id: property.id,
     image: property.primary_image
@@ -101,13 +170,13 @@ const mapPropertyToListing = (property: Property): ListingViewModel => {
     price: formatVndPrice(rawPrice),
     rawPrice,
     title: property.title,
-    address: [property.address, property.ward, property.district, property.city].filter(Boolean).join(', '),
+    address: [property.address, property.ward, district, property.city].filter(Boolean).join(', '),
     beds: property.bedrooms ?? 0,
     baths: property.bathrooms ?? 0,
     area: Number(property.area || 0),
     type: property.property_type_display || property.property_type || 'Property',
     city: property.city || '',
-    district: property.district || '',
+    district,
     listingType: property.listing_type,
     propertyType: property.property_type,
     isFavorited: Boolean(property.is_favorited),
@@ -117,16 +186,17 @@ const mapPropertyToListing = (property: Property): ListingViewModel => {
 };
 
 const Listings = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { isLoggedIn } = useAuth();
-  const requestedType = searchParams.get('type') === 'rent' ? 'rent' : 'buy';
+  const requestedType = normalizeListingTypeParam(searchParams.get('type'));
   const requestedSearch = searchParams.get('search')?.trim() ?? '';
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
   }, []);
 
   const [allListings, setAllListings] = useState<ListingViewModel[]>([]);
+  const [totalResults, setTotalResults] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedListing, setSelectedListing] = useState<ListingViewModel | null>(null);
@@ -134,47 +204,100 @@ const Listings = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<SortBy>('newest');
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [searchInput, setSearchInput] = useState(requestedSearch);
   const [filters, setFilters] = useState<ListingFiltersState>(() => {
     const initial = getLocationLabelFromSlug(
       searchParams.get('province'),
       searchParams.get('location'),
     );
+    const selectedPricePreset = searchParams.get('price');
+    const priceRange = selectedPricePreset && PRICE_PRESETS[selectedPricePreset]
+      ? PRICE_PRESETS[selectedPricePreset]
+      : DEFAULT_LISTING_FILTERS.priceRange;
 
     return {
       ...DEFAULT_LISTING_FILTERS,
       listingType: requestedType,
       city: initial.city,
       district: initial.district,
+      selectedPricePreset: selectedPricePreset && PRICE_PRESETS[selectedPricePreset] ? selectedPricePreset : null,
+      priceRange,
+      propertyTypes: parsePropertyTypesParam(searchParams.get('property_type')),
+      bedrooms: parseBedroomsParam(searchParams.get('bedrooms')),
     };
   });
+  const [serverFilters, setServerFilters] = useState<ListingFiltersState>(filters);
 
   useEffect(() => {
-    let mounted = true;
+    const timeout = window.setTimeout(() => {
+      setServerFilters(filters);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [filters]);
+
+  const activeServerFilters = serverFilters;
+
+  const propertyQueryFilters = useMemo(() => {
+    const activeFilters = activeServerFilters;
+    const [minPriceBillion, maxPriceBillion] = activeFilters.priceRange;
+    const listingTypeValue = activeFilters.listingType === 'buy' ? 'sale' : 'rent';
+    const ordering = sortBy === 'price-asc' ? 'price' : sortBy === 'price-desc' ? '-price' : '-created_at';
+    const query: PropertyFilters = {
+      listing_type: listingTypeValue,
+      price_min: Math.round(minPriceBillion * 1_000_000_000),
+      price_max: Math.round(maxPriceBillion * 1_000_000_000),
+      ordering,
+      page: currentPage,
+      page_size: ITEMS_PER_PAGE,
+    };
+
+    if (requestedSearch) query.search = requestedSearch;
+    if (activeFilters.city) query.city = activeFilters.city;
+    if (activeFilters.district) query.district = activeFilters.district;
+    if (activeFilters.propertyTypes.length === 1) {
+      query.property_type = activeFilters.propertyTypes[0];
+    } else if (activeFilters.propertyTypes.length > 1) {
+      query.property_types = activeFilters.propertyTypes.join(',');
+    }
+    if (activeFilters.bedrooms !== null) {
+      if (activeFilters.bedrooms >= 5) {
+        query.bedrooms_min = activeFilters.bedrooms;
+      } else {
+        query.bedrooms = activeFilters.bedrooms;
+      }
+    }
+
+    return query;
+  }, [activeServerFilters, currentPage, requestedSearch, sortBy]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const fetchListings = async () => {
       setLoading(true);
       setError('');
       try {
-        const response = await getProperties();
+        const response = await getProperties(propertyQueryFilters, controller.signal);
         const items = normalizeListResponse(response);
         const mapped = items.map(mapPropertyToListing);
-        if (mounted) {
-          setAllListings(mapped);
-        }
+        setAllListings(mapped);
+        setTotalResults(Array.isArray(response) ? mapped.length : response.count);
       } catch (_err) {
-        if (mounted) {
-          const err = _err as {
-            response?: { status?: number };
-            code?: string;
-          };
-          const statusCode = err.response?.status;
-          const nextMessage = statusCode
-            ? `Khong tai duoc danh sach bat dong san tu he thong (HTTP ${statusCode}).`
-            : 'Khong tai duoc danh sach bat dong san tu he thong. Kiem tra backend, API URL hoac CORS.';
-          setError(nextMessage);
-          setAllListings([]);
+        const err = _err as {
+          response?: { status?: number };
+          code?: string;
+        };
+        if (err.code === 'ERR_CANCELED' || controller.signal.aborted) {
+          return;
         }
+        const statusCode = err.response?.status;
+        const nextMessage = statusCode
+          ? `Khong tai duoc danh sach bat dong san tu he thong (HTTP ${statusCode}).`
+          : 'Khong tai duoc danh sach bat dong san tu he thong. Kiem tra backend, API URL hoac CORS.';
+        setError(nextMessage);
+        setAllListings([]);
+        setTotalResults(0);
       } finally {
-        if (mounted) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
@@ -182,22 +305,33 @@ const Listings = () => {
 
     fetchListings();
     return () => {
-      mounted = false;
+      controller.abort();
     };
-  }, []);
+  }, [propertyQueryFilters]);
 
   useEffect(() => {
     const next = getLocationLabelFromSlug(
       searchParams.get('province'),
       searchParams.get('location'),
     );
-    const nextListingType = searchParams.get('type') === 'rent' ? 'rent' : 'buy';
+    const nextListingType = normalizeListingTypeParam(searchParams.get('type'));
+    const nextPricePreset = searchParams.get('price');
+    const nextPriceRange = nextPricePreset && PRICE_PRESETS[nextPricePreset]
+      ? PRICE_PRESETS[nextPricePreset]
+      : DEFAULT_LISTING_FILTERS.priceRange;
+    const nextPropertyTypes = parsePropertyTypesParam(searchParams.get('property_type'));
+    const nextBedrooms = parseBedroomsParam(searchParams.get('bedrooms'));
 
     setFilters((current) => {
       if (
         current.city === next.city &&
         current.district === next.district &&
-        current.listingType === nextListingType
+        current.listingType === nextListingType &&
+        current.selectedPricePreset === (nextPricePreset && PRICE_PRESETS[nextPricePreset] ? nextPricePreset : null) &&
+        current.priceRange[0] === nextPriceRange[0] &&
+        current.priceRange[1] === nextPriceRange[1] &&
+        current.bedrooms === nextBedrooms &&
+        current.propertyTypes.join(',') === nextPropertyTypes.join(',')
       ) {
         return current;
       }
@@ -207,9 +341,17 @@ const Listings = () => {
         listingType: nextListingType,
         city: next.city,
         district: next.district,
+        selectedPricePreset: nextPricePreset && PRICE_PRESETS[nextPricePreset] ? nextPricePreset : null,
+        priceRange: nextPriceRange,
+        propertyTypes: nextPropertyTypes,
+        bedrooms: nextBedrooms,
       };
     });
   }, [searchParams]);
+
+  useEffect(() => {
+    setSearchInput(requestedSearch);
+  }, [requestedSearch]);
 
   const cityOptions = useMemo(() => {
     return dedupeLocations([
@@ -223,68 +365,27 @@ const Listings = () => {
     if (!filters.city) return [];
     const normalizedCity = normalizeLocationValue(filters.city);
     const province = VIETNAM_PROVINCES.find((item) => normalizeLocationValue(item.name) === normalizedCity);
-    const administrativeProvince = VIETNAM_ADMINISTRATIVE_UNITS.find((item) => normalizeLocationValue(item.name) === normalizedCity);
+    const administrativeProvince = getAdministrativeProvince(filters.city);
+
+    const referenceDistricts = administrativeProvince
+      ? administrativeProvince.districts.map((item) => item.full_name || item.name)
+      : province?.locations.map((item) => item.name) ?? [];
 
     return dedupeLocations([
       ...allListings
         .filter((item) => normalizeLocationValue(item.city) === normalizedCity)
         .map((item) => item.district)
         .filter(Boolean) as string[],
-      ...(province?.locations.map((item) => item.name) ?? []),
-      ...(administrativeProvince?.districts.map((item) => item.name) ?? []),
+      ...referenceDistricts,
     ]);
   }, [allListings, filters.city]);
 
-  const filteredListings = useMemo(() => {
-    const [minPriceBillion, maxPriceBillion] = filters.priceRange;
-    const listingTypeValue = filters.listingType === 'buy' ? 'sale' : 'rent';
-    const normalizedCity = normalizeLocationValue(filters.city);
-    const normalizedDistrict = normalizeLocationValue(filters.district);
-    const normalizedSearch = normalizeLocationValue(requestedSearch);
-
-    return allListings.filter((item) => {
-      const priceBillion = item.rawPrice / 1_000_000_000;
-      if (item.listingType !== listingTypeValue) return false;
-      if (priceBillion < minPriceBillion || priceBillion > maxPriceBillion) return false;
-      if (filters.city && normalizeLocationValue(item.city) !== normalizedCity) return false;
-      if (filters.district && normalizeLocationValue(item.district) !== normalizedDistrict) return false;
-      if (filters.propertyTypes.length > 0 && !filters.propertyTypes.includes(item.propertyType)) return false;
-      if (normalizedSearch) {
-        const haystack = normalizeLocationValue([
-          item.title,
-          item.address,
-          item.city,
-          item.district,
-          item.type,
-        ].filter(Boolean).join(' '));
-        if (!haystack.includes(normalizedSearch)) return false;
-      }
-      return true;
-    });
-  }, [allListings, filters, requestedSearch]);
-
-  const sortedListings = useMemo(() => {
-    const cloned = [...filteredListings];
-    if (sortBy === 'price-asc') {
-      cloned.sort((a, b) => a.rawPrice - b.rawPrice);
-      return cloned;
-    }
-    if (sortBy === 'price-desc') {
-      cloned.sort((a, b) => b.rawPrice - a.rawPrice);
-      return cloned;
-    }
-    return cloned;
-  }, [filteredListings, sortBy]);
-
-  const totalResults = sortedListings.length;
   const totalPages = Math.max(1, Math.ceil(totalResults / ITEMS_PER_PAGE));
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-  const endIndex = startIndex + ITEMS_PER_PAGE;
-  const paginatedListings = sortedListings.slice(startIndex, endIndex);
+  const paginatedListings = allListings;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filters, sortBy]);
+  }, [filters, sortBy, requestedSearch]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -294,11 +395,11 @@ const Listings = () => {
 
   useEffect(() => {
     if (!selectedListing) return;
-    const exists = sortedListings.some((item) => item.id === selectedListing.id);
+    const exists = allListings.some((item) => item.id === selectedListing.id);
     if (!exists) {
       setSelectedListing(null);
     }
-  }, [selectedListing, sortedListings]);
+  }, [allListings, selectedListing]);
 
   const handleToggleFavorite = async (
     propertyId: number,
@@ -328,6 +429,17 @@ const Listings = () => {
     }
   };
 
+  const updateSearchParam = (value: string) => {
+    const params = new URLSearchParams(searchParams);
+    const trimmed = value.trim();
+    if (trimmed) {
+      params.set('search', trimmed);
+    } else {
+      params.delete('search');
+    }
+    setSearchParams(params);
+  };
+
   return (
     <div className="min-h-screen bg-[#F6F7F9]">
       <div className="bg-white">
@@ -351,11 +463,48 @@ const Listings = () => {
           </motion.aside>
 
           <div className="flex-1 min-w-0 flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-              <p className="text-muted-foreground">
-                Showing <span className="font-semibold text-foreground">{totalResults}</span> results
-              </p>
-              <div className="flex items-center gap-3">
+            <div className="mb-6 space-y-4">
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  updateSearchParam(searchInput);
+                }}
+                className="flex flex-col gap-3 rounded-2xl border border-border bg-white p-3 shadow-sm md:flex-row md:items-center"
+              >
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(event) => setSearchInput(event.target.value)}
+                    placeholder="Search by title, street, district, province..."
+                    className="h-11 w-full rounded-xl border border-transparent bg-secondary/40 pl-10 pr-10 text-sm outline-none transition-colors focus:border-primary/30 focus:bg-white"
+                  />
+                  {searchInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearchInput('');
+                        updateSearchParam('');
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                      aria-label="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <Button type="submit" className="h-11 px-6">
+                  <Search className="h-4 w-4" />
+                  Search
+                </Button>
+              </form>
+
+              <div className="flex items-center justify-between">
+                <p className="text-muted-foreground">
+                  Showing <span className="font-semibold text-foreground">{totalResults}</span> results
+                </p>
+                <div className="flex items-center gap-3">
                 <div className="relative">
                   <Button
                     variant="outline"
@@ -426,6 +575,7 @@ const Listings = () => {
                     <List className="w-4 h-4" />
                   </button>
                 </div>
+              </div>
               </div>
             </div>
 
