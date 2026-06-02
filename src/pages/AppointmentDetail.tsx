@@ -36,7 +36,7 @@ const statusMeta: Record<
 > = {
   pending: {
     label: 'Pending Seller Approval',
-    badge: 'bg-orange-50 border-orange-200 text-orange-700',
+    badge: 'bg-red-50 border-red-200 text-red-700',
     icon: <CalendarClock className="w-4 h-4" />,
   },
   confirmed: {
@@ -376,7 +376,7 @@ const AppointmentDetail = () => {
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {shareMessage && (
                     <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700">
                       {shareMessage}
@@ -388,7 +388,7 @@ const AppointmentDetail = () => {
                       'w-full h-12 text-base font-bold transition-all',
                       !['pending', 'confirmed'].includes(appointment.status)
                         ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400'
-                        : 'border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-300'
+                        : 'border-red-200 text-red-600 hover:bg-transparent hover:text-red-600 hover:border-red-200'
                     )}
                     onClick={handleCancelAppointment}
                     disabled={!['pending', 'confirmed'].includes(appointment.status) || isCancelling}
@@ -407,7 +407,7 @@ const AppointmentDetail = () => {
                   </Button>
 
                   {property && (
-                    <Link to={`/property/${property.id}`}>
+                    <Link to={`/property/${property.id}`} className="block">
                       <Button className="w-full h-12 text-base font-bold bg-[#0F766E] hover:bg-[#0F766E]/90">
                         View Property Detail
                       </Button>
