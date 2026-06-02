@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
@@ -83,6 +83,7 @@ const AppointmentDetail = () => {
   const [error, setError] = useState('');
   const [activeImage, setActiveImage] = useState(0);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [shareMessage, setShareMessage] = useState('');
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
@@ -158,6 +159,25 @@ const AppointmentDetail = () => {
     }
   };
 
+  const handleShare = async () => {
+    const url = `${window.location.origin}/appointment/${appointment?.id ?? id}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: appointment?.property_title ?? 'Viewing appointment', url });
+        setShareMessage('Appointment link shared.');
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareMessage('Appointment link copied.');
+      }
+    } catch (err) {
+      if ((err as { name?: string })?.name !== 'AbortError') {
+        setShareMessage('Cannot share this appointment right now.');
+      }
+    } finally {
+      window.setTimeout(() => setShareMessage(''), 2400);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F6F7F9]">
@@ -191,8 +211,7 @@ const AppointmentDetail = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#F6F7F9] font-['Josefin_Sans']">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;500;600;700&display=swap');`}</style>
+    <div className="min-h-screen bg-[#F6F7F9]">
       <Header />
 
       <main className="pt-28 pb-16 max-w-[1440px] mx-auto px-4 md:px-8">
@@ -213,12 +232,21 @@ const AppointmentDetail = () => {
                 className="w-full h-full object-cover"
               />
               <div className="absolute top-4 right-4 flex gap-3">
-                <button className="w-10 h-10 rounded-full bg-white/90 shadow-sm flex items-center justify-center hover:bg-white transition-all text-gray-600">
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className="w-10 h-10 rounded-full bg-white/90 shadow-sm flex items-center justify-center hover:bg-white transition-all text-gray-600"
+                  aria-label="Share appointment"
+                >
                   <Share2 className="w-5 h-5" />
                 </button>
-                <button className="w-10 h-10 rounded-full bg-white/90 shadow-sm flex items-center justify-center hover:bg-white transition-all text-red-500">
+                <Link
+                  to={property ? `/property/${property.id}` : '/listings'}
+                  className="w-10 h-10 rounded-full bg-white/90 shadow-sm flex items-center justify-center hover:bg-white transition-all text-red-500"
+                  aria-label="Open property"
+                >
                   <Heart className="w-5 h-5 fill-current" />
-                </button>
+                </Link>
               </div>
             </div>
 
@@ -240,7 +268,7 @@ const AppointmentDetail = () => {
             <div className="p-8">
               <div className="flex flex-col md:flex-row justify-between items-start gap-6 mb-6">
                 <div>
-                  <h1 className="text-3xl font-bold text-foreground font-['Inter'] leading-tight mb-2">
+                  <h1 className="text-3xl font-bold text-foreground leading-tight mb-2">
                     {property?.title || appointment.property_title}
                   </h1>
                   <div className="flex items-center gap-2 text-muted-foreground">
@@ -248,7 +276,7 @@ const AppointmentDetail = () => {
                     <span className="text-lg">{property?.address || appointment.property_address}</span>
                   </div>
                 </div>
-                <div className="text-2xl md:text-3xl font-bold text-[#0F766E] font-['Inter'] whitespace-nowrap">
+                <div className="text-2xl md:text-3xl font-bold text-[#0F766E] whitespace-nowrap">
                   {formatVndPrice(property?.price)}
                 </div>
               </div>
@@ -270,14 +298,14 @@ const AppointmentDetail = () => {
                 </div>
               )}
 
-              <h3 className="text-xl font-bold mb-4 font-['Inter']">Property Overview</h3>
+              <h3 className="text-xl font-bold mb-4">Property Overview</h3>
               <p className="text-gray-600 leading-relaxed mb-8 text-lg">
                 {property?.description || 'No additional property description is currently available.'}
               </p>
 
               {mapLat !== null && mapLng !== null ? (
                 <>
-                  <h3 className="text-xl font-bold mb-4 font-['Inter']">Location</h3>
+                  <h3 className="text-xl font-bold mb-4">Location</h3>
                   <div className="h-72 w-full rounded-xl overflow-hidden border border-border mb-8">
                     <Map
                       viewport={{ center: [mapLng, mapLat], zoom: 13, bearing: 0, pitch: 0 }}
@@ -298,7 +326,7 @@ const AppointmentDetail = () => {
                 </div>
               )}
 
-              <h3 className="text-xl font-bold mb-4 font-['Inter']">Listing Contact</h3>
+              <h3 className="text-xl font-bold mb-4">Listing Contact</h3>
               <div className="flex items-center gap-4 p-4 border border-border rounded-xl bg-gray-50/50">
                 <Avatar className="w-14 h-14 border-2 border-white shadow-sm">
                   <AvatarImage src="" />
@@ -329,7 +357,7 @@ const AppointmentDetail = () => {
           <aside className="w-full lg:w-[380px] flex-shrink-0">
             <div className="sticky top-28 bg-white rounded-2xl shadow-lg border border-border p-6 flex flex-col gap-6">
               <div>
-                <h3 className="text-lg font-bold font-['Inter'] mb-4">Viewing Schedule</h3>
+                <h3 className="text-lg font-bold mb-4">Viewing Schedule</h3>
                 <div
                   className={cn(
                     'p-4 rounded-xl border transition-colors mb-4',
@@ -349,6 +377,11 @@ const AppointmentDetail = () => {
                 </div>
 
                 <div className="space-y-3">
+                  {shareMessage && (
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700">
+                      {shareMessage}
+                    </div>
+                  )}
                   <Button
                     variant="outline"
                     className={cn(
@@ -386,7 +419,7 @@ const AppointmentDetail = () => {
               <hr className="border-border" />
 
               <div>
-                <h3 className="text-lg font-bold font-['Inter'] mb-3">Your Contact Info</h3>
+                <h3 className="text-lg font-bold mb-3">Your Contact Info</h3>
                 <div className="space-y-2 text-sm text-slate-600">
                   <p>
                     <span className="font-semibold text-slate-700">Name:</span> {appointment.name}
@@ -411,3 +444,4 @@ const AppointmentDetail = () => {
 };
 
 export default AppointmentDetail;
+

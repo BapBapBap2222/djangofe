@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { motion } from 'framer-motion';
@@ -104,6 +104,7 @@ const PropertyDetail = () => {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [shareMessage, setShareMessage] = useState('');
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
@@ -220,6 +221,27 @@ const PropertyDetail = () => {
     }
   };
 
+  const handleShare = async () => {
+    if (!property) return;
+    const url = `${window.location.origin}/property/${property.id}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: property.title, url });
+        setShareMessage('Property link shared.');
+      } else {
+        await navigator.clipboard.writeText(url);
+        setShareMessage('Property link copied.');
+      }
+    } catch (err) {
+      if ((err as { name?: string })?.name !== 'AbortError') {
+        setShareMessage('Cannot share this property right now.');
+      }
+    } finally {
+      window.setTimeout(() => setShareMessage(''), 2400);
+    }
+  };
+
   const handleOpenSchedule = () => {
     setBookingError('');
     if (!isLoggedIn) {
@@ -298,7 +320,7 @@ const PropertyDetail = () => {
         <div className="pt-28 pb-16 max-w-[1440px] mx-auto px-4 md:px-8">
           <div className="text-center py-20">
             <Building2 className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-            <h1 className="text-2xl font-bold text-slate-800 font-['Inter'] mb-2">Property Not Found</h1>
+            <h1 className="text-2xl font-bold text-slate-800 mb-2">Property Not Found</h1>
             <p className="text-slate-500 mb-6">{error || "The property you're looking for is unavailable."}</p>
             <Link to="/listings">
               <Button className="h-11 px-6">
@@ -314,8 +336,7 @@ const PropertyDetail = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#F6F7F9] font-['Josefin_Sans']">
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@300;400;500;600;700&display=swap');`}</style>
+    <div className="min-h-screen bg-[#F6F7F9]">
       <Header />
 
       <main className="pt-24 pb-16">
@@ -366,7 +387,12 @@ const PropertyDetail = () => {
                   )}
 
                   <div className="absolute top-4 right-4 flex gap-2">
-                    <button className="w-10 h-10 rounded-full bg-white/90 flex items-center justify-center hover:bg-white transition-all cursor-pointer">
+                    <button
+                      type="button"
+                      onClick={handleShare}
+                      className="w-10 h-10 rounded-full bg-white/90 flex items-center justify-center hover:bg-white transition-all cursor-pointer"
+                      title="Share property"
+                    >
                       <Share2 className="w-5 h-5 text-slate-600" />
                     </button>
                     <button
@@ -409,11 +435,11 @@ const PropertyDetail = () => {
                     <span className="inline-block text-xs font-bold px-3 py-1 rounded-full bg-teal-50 text-teal-700 mb-3">
                       {property.property_type_display || property.property_type}
                     </span>
-                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900 font-['Inter'] leading-tight break-words">
+                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900 leading-tight break-words">
                       {property.title}
                     </h1>
                   </div>
-                  <p className="text-xl md:text-3xl font-bold text-teal-700 font-['Inter'] md:whitespace-nowrap md:shrink-0">
+                  <p className="text-xl md:text-3xl font-bold text-teal-700 md:whitespace-nowrap md:shrink-0">
                     {formatVndPrice(property.price)}
                   </p>
                 </div>
@@ -449,12 +475,12 @@ const PropertyDetail = () => {
                 transition={{ duration: 0.4, delay: 0.15 }}
                 className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 mb-6"
               >
-                <h3 className="text-lg font-bold text-slate-900 font-['Inter'] mb-3">Description</h3>
+                <h3 className="text-lg font-bold text-slate-900 mb-3">Description</h3>
                 <p className="text-sm text-slate-600 leading-relaxed mb-6">
                   {property.description || 'No detailed description provided yet.'}
                 </p>
 
-                <h3 className="text-lg font-bold text-slate-900 font-['Inter'] mb-3">Features & Amenities</h3>
+                <h3 className="text-lg font-bold text-slate-900 mb-3">Features & Amenities</h3>
                 {features.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {features.map((feature) => (
@@ -478,7 +504,7 @@ const PropertyDetail = () => {
                 transition={{ duration: 0.4, delay: 0.2 }}
                 className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 mb-6"
               >
-                <h3 className="text-lg font-bold text-slate-900 font-['Inter'] mb-4">Property Details</h3>
+                <h3 className="text-lg font-bold text-slate-900 mb-4">Property Details</h3>
                 <div className="space-y-0">
                   {detailRows.map((row, index) => {
                     const Icon = row.icon;
@@ -507,7 +533,7 @@ const PropertyDetail = () => {
                   transition={{ duration: 0.4, delay: 0.25 }}
                   className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 mb-6"
                 >
-                  <h3 className="text-lg font-bold text-slate-900 font-['Inter'] mb-4 flex items-center gap-2">
+                  <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                     <Image className="w-5 h-5 text-teal-600" />
                     Property Photos
                   </h3>
@@ -532,7 +558,7 @@ const PropertyDetail = () => {
                 transition={{ duration: 0.4, delay: 0.3 }}
                 className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8"
               >
-                <h3 className="text-lg font-bold text-slate-900 font-['Inter'] mb-4 flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-teal-600" />
                   Location
                 </h3>
@@ -582,7 +608,7 @@ const PropertyDetail = () => {
                       </AvatarFallback>
                     </Avatar>
                     <div>
-                      <h4 className="text-lg font-bold text-slate-900 font-['Inter']">{agentName}</h4>
+                      <h4 className="text-lg font-bold text-slate-900">{agentName}</h4>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         <div className="flex items-center gap-0.5">
                           {[...Array(5)].map((_, i) => (
@@ -612,6 +638,11 @@ const PropertyDetail = () => {
                   {bookingError && (
                     <div className="mb-4 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                       {bookingError}
+                    </div>
+                  )}
+                  {shareMessage && (
+                    <div className="mb-4 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
+                      {shareMessage}
                     </div>
                   )}
 
@@ -670,3 +701,4 @@ const PropertyDetail = () => {
 };
 
 export default PropertyDetail;
+
